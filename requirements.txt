@@ -2,4 +2,8 @@ pandas
 numpy
 pdfplumber
 
+groq
+streamlit
+
+python-dotenv
 ipykernel

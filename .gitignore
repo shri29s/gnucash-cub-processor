@@ -2,3 +2,4 @@ statement.csv
 statement_pdf.pdf
 
 venv/
+.env

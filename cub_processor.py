@@ -2,7 +2,6 @@ import pdfplumber
 import csv
 import sys
 import pandas as pd
-import numpy as np
 
 class Convert_pdf_csv:
     def __init__(self, pdf_path, csv_path, source_acc):
