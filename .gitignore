@@ -3,3 +3,4 @@ statement_pdf.pdf
 
 venv/
 .env
+*.log
