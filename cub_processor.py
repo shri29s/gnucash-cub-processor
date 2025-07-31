@@ -109,18 +109,21 @@ class Convert_pdf_csv:
         return re.sub(r"\d", "x", desc)
     
     def categorize(self, desc: str):
-        original_desc = desc
         desc = str(desc).upper()
         desc = self.mask_numbers(desc)
-
-        logging.debug(f"Categorizing transaction: '{original_desc}' -> masked: '{desc}'")
+        logging.debug(f"Categorizing transaction: '{desc}'")
 
         prompt = f'''
 Classify the following bank transaction description into one of the following categories:
 {self.accounts}
-If unsure, return Expenses:Other.
+If unsure, return Expenses:Other or Income:Other.
 Description: {desc}
-Return only the category name.
+
+NOTE:
+If 'TO' in description, it is a debit.
+If 'BY' in description, it is a credit.
+
+* Please return only the category name.
 '''
         message = {
             "role": "user",
@@ -136,10 +139,17 @@ Return only the category name.
             )  
 
             category = response.choices[0].message.content.strip()
-            logging.debug(f"Transaction '{original_desc}' categorized as: '{category}'")
+            category = category.split(" ")[-1]
+            split = category.split(":")
+            if len(split) <= 1 or (split[0] != "Expenses" and split[0] != "Income") or split[1] == "":
+                if desc.startswith("TO"):
+                    category = "Expenses:Other"
+                else:
+                    category = "Income:Other"
+            logging.debug(f"Transaction '{desc}' categorized as: '{category}'")
             return category
         except Exception as e:
-            logging.warning(f"Error categorizing transaction '{original_desc}': {e}. Using default category 'Expenses:Other'")
+            logging.warning(f"Error categorizing transaction '{desc}': {e}. Using default category 'Expenses:Other'")
             return "Expenses:Other" 
         
     def currency_to_float(self, value):
@@ -180,11 +190,6 @@ Return only the category name.
             df['Account'] = [self.source_acc for i in df["Date"]]
             logging.info(f"Added source account '{self.source_acc}' to all transactions")
             
-            # Categorize transactions
-            logging.info("Starting transaction categorization using AI")
-            df['Transfer Account'] = df.apply(lambda x: self.categorize(x["Description"]), axis=1)
-            logging.info("Transaction categorization completed")
-            
             # Filter out totals
             before_filter = len(df)
             df = df[df['Date'] != "TOTAL"]
@@ -200,6 +205,11 @@ Return only the category name.
             df["Amount"] = df["Credit"] - df["Debit"]
             logging.info("Currency values processed and amounts calculated")
 
+            # Categorize transactions
+            logging.info("Starting transaction categorization using AI")
+            df['Transfer Account'] = df.apply(lambda x: self.categorize(x["Description"]), axis=1)
+            logging.info("Transaction categorization completed")
+
             # Final output
             df = df[["Date", "Description", "Account", "Transfer Account", "Amount"]]
             df.to_csv("statement.csv", index=False)
@@ -214,14 +224,10 @@ Return only the category name.
 if __name__=="__main__":
     if not os.path.exists("config.yaml"):
         print("Config file not found!")
-        logging.error("Config file 'config.yaml' not found in current directory")
         sys.exit(1)
 
     try:
-        logging.info("=== Starting CUB Bank Statement Processing ===")
         conv = Convert_pdf_csv()
         conv.convert()
-        logging.info("=== CUB Bank Statement Processing Completed Successfully ===")
     except Exception as e:
-        logging.error(f"Application failed with error: {e}")
         sys.exit(1)
