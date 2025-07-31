@@ -5,5 +5,7 @@ pdfplumber
 groq
 streamlit
 
+pyyaml
+
 python-dotenv
 ipykernel

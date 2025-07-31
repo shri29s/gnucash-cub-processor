@@ -3,11 +3,37 @@ import csv
 import sys
 import pandas as pd
 
+from dotenv import load_dotenv
+import groq
+import os
+import re
+
+import yaml
+
 class Convert_pdf_csv:
-    def __init__(self, pdf_path, csv_path, source_acc):
-        self.pdf_path = pdf_path
-        self.csv_path = csv_path
-        self.source_acc = source_acc
+    def __init__(self):
+        with open("config.yaml", "r") as file:
+            config = yaml.safe_load(file)
+
+        load_dotenv(config["config"].get("env_file", ".env"))
+        self.pdf_path = config["config"].get("pdf_path")
+        self.csv_path = config["config"].get("csv_path")
+        self.source_acc = config["config"].get("source_acc")
+
+        self.client = groq.Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.accounts = self.load_accounts(config["accounts"])
+
+    def load_accounts(self, account_config):
+        expense_accounts = []
+        income_accounts = []
+
+        for expense in account_config['Expenses']:
+            expense_accounts.append(expense["account"])
+
+        for income in account_config["Income"]:
+            income_accounts.append(income["account"])
+
+        return {"Expenses": expense_accounts, "Income": income_accounts}
 
     def pdf_csv(self):
         with pdfplumber.open(self.pdf_path) as pdf, open(self.csv_path, "w") as csv_file:
@@ -19,24 +45,33 @@ class Convert_pdf_csv:
                         for row in table:
                             writer.writerow(row)
 
+    def mask_numbers(self, desc):
+        return re.sub(r"\d", "x", desc)
+
     def categorize(self, desc: str):
         desc = str(desc).upper()
-        result = ""
-        if "TO" in desc:
-            result += "Expenses:"
-        else:
-            result += "Income:"
+        desc = self.mask_numbers(desc)
 
-        if "UPI" in desc:
-            result += "UPI"
-        elif "INTEREST" in desc:
-            result += "Interest"
-        elif "IMPS" in desc:
-            result += "IMPS"
-        else:
-            result += "Misc"
-        
-        return result
+        prompt = f'''
+Classify the following bank transaction description into one of the following categories:
+{self.accounts}
+If unsure, return Expenses:Other.
+Description: {desc}
+Return only the category name.
+'''
+        message = {
+            "role": "user",
+            "content": prompt
+        }
+
+        response = self.client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[message],
+            temperature=0.5,
+            max_completion_tokens=50,
+        )  
+
+        return response.choices[0].message.content.strip() 
         
     def currency_to_float(self, value):
         if isinstance(value, str):
@@ -67,9 +102,9 @@ class Convert_pdf_csv:
         df.to_csv("statement.csv", index=False)
 
 if __name__=="__main__":
-    pdf_path = sys.argv[1]
-    csv_path = sys.argv[2]
-    source_acc = sys.argv[3]
+    if not os.path.exists("config.yaml"):
+        print("Config file not found!")
+        sys.exit(1)
 
-    conv = Convert_pdf_csv(pdf_path, csv_path, source_acc)
+    conv = Convert_pdf_csv()
     conv.convert()
