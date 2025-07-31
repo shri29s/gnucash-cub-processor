@@ -54,6 +54,7 @@ class Convert_pdf_csv:
 
         try:
             self.accounts = self.load_accounts(config["accounts"])
+            self.allowed_categories = set(self.accounts["Expenses"] + self.accounts["Income"])
             logging.info(f"Account configuration loaded - {len(self.accounts['Expenses'])} expense accounts, {len(self.accounts['Income'])} income accounts")
         except Exception as e:
             logging.error(f"Failed to load account configuration: {e}")
@@ -113,44 +114,49 @@ class Convert_pdf_csv:
         desc = self.mask_numbers(desc)
         logging.debug(f"Categorizing transaction: '{desc}'")
 
-        prompt = f'''
-Classify the following bank transaction description into one of the following categories:
+        prompt = f"""
+You are a finance assistant trained to classify bank transaction descriptions into specific accounting categories.
+
+Classify the following transaction into **exactly one** of the categories listed below:
+
 {self.accounts}
-If unsure, return Expenses:Other or Income:Other.
-Description: {desc}
 
-NOTE:
-If 'TO' in description, it is a debit.
-If 'BY' in description, it is a credit.
+Description: "{desc}"
 
-* Please return only the category name.
-'''
-        message = {
-            "role": "user",
-            "content": prompt
-        }
+Guidelines:
+- If the description starts with 'TO', it's a debit (Expense).
+- If the description starts with 'BY', it's a credit (Income).
+- If you're unsure, choose the most likely category.
+- Only return a valid category from the list. If it doesn't fit, use "Expenses:Other" or "Income:Other".
+
+Respond with only the category name, nothing else.
+"""
 
         try:
             response = self.client.chat.completions.create(
                 model="llama3-70b-8192",
-                messages=[message],
-                temperature=0.5,
-                max_completion_tokens=50,
-            )  
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,  # more deterministic
+                max_tokens=30
+            )
 
+            # Extract clean result
             category = response.choices[0].message.content.strip()
-            category = category.split(" ")[-1]
-            split = category.split(":")
-            if len(split) <= 1 or (split[0] != "Expenses" and split[0] != "Income") or split[1] == "":
+
+            # Ensure output is valid
+            if category not in self.allowed_categories:
                 if desc.startswith("TO"):
                     category = "Expenses:Other"
                 else:
                     category = "Income:Other"
+
             logging.debug(f"Transaction '{desc}' categorized as: '{category}'")
             return category
+
         except Exception as e:
             logging.warning(f"Error categorizing transaction '{desc}': {e}. Using default category 'Expenses:Other'")
-            return "Expenses:Other" 
+            return "Expenses:Other"
+
         
     def currency_to_float(self, value):
         try:
